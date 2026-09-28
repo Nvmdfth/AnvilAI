@@ -10,3 +10,5 @@ services:
     ports:
       - "8080:8080"
     restart: unless-stopped
+    cpus: "3.0"
+    mem_limit: "4g"

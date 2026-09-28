@@ -4,7 +4,7 @@ import requests
 class LlamaClient:
     """Thin wrapper around the llama.cpp server's OpenAI-compatible API."""
 
-    def __init__(self, base_url: str = "http://localhost:8080", timeout: float = 120.0):
+    def __init__(self, base_url: str = "http://localhost:8080", timeout: float = 300.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 

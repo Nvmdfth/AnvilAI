@@ -24,6 +24,7 @@ def hammer_code(
     test_code: str,
     passes: int = 5,
     client: LlamaClient | None = None,
+    verbose: bool = False,
 ) -> CodeResult:
     """Generate code for `task`, verifying against `test_code` each pass.
 
@@ -45,6 +46,12 @@ def hammer_code(
         messages.append({"role": "assistant", "content": response})
 
         result = run_tests(code, test_code)
+
+        if verbose:
+            print(f"--- pass {i} ---")
+            print(code)
+            print(f"[{'PASS' if result.passed else 'FAIL'}] {result.output.strip()}")
+
         if result.passed:
             return CodeResult(code=code, passed=True, passes_used=i)
 
