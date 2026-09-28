@@ -65,11 +65,25 @@ same issue on the AnvilAI side).
 
 ### Windows
 
-No installer yet. `cargo build --release` in `agent/` on a Windows
-machine with Rust installed should produce a working `.exe` - the
-agent's dependencies (`reqwest`, `tokio`, `sysinfo`) are all
-cross-platform - but this hasn't been built or tested on Windows from
-this repo yet.
+`cargo build --release` in `agent/` on a Windows machine with Rust
+installed produces a working `.exe` - the agent's dependencies
+(`reqwest`, `tokio`, `sysinfo`) are all cross-platform, and it now
+detects NVIDIA/AMD/Intel GPUs via `nvidia-smi`/WMI and reports them in
+`hardware_metadata.gpus`.
+
+The agent still needs a local `hammer-api` to proxy jobs to (as on
+Linux). `../../scripts/install.ps1` is the Windows equivalent of the
+root `scripts/install.sh`: it detects a GPU backend and downloads a
+matching llama.cpp build (CUDA/Vulkan/CPU), the default model, and sets
+up hammer-api's venv, then registers both as logon-triggered Scheduled
+Tasks (no admin rights needed - unlike a Windows service). Nothing
+starts the `omnimesh-agent.exe` itself yet on Windows, unlike the
+Linux agent's own `agent/install.sh`; run it manually for now with
+`HUB_URL`/`AGENT_TOKEN`/etc. set.
+
+Until hammer-api reports healthy, the agent registers with the hub as
+`status: "installing"` rather than `"online"`, so the hub won't assign
+it jobs mid-setup - see `main.rs`'s readiness gate.
 
 ## Manual/dev testing without installing anything
 

@@ -4,6 +4,8 @@ use std::fs;
 use std::time::Duration;
 use sysinfo::System;
 
+mod gpu;
+
 struct Config {
     hub_url: String,
     agent_token: String,
@@ -52,6 +54,22 @@ async fn benchmark(client: &reqwest::Client, cfg: &Config) -> Option<f64> {
     data["timings"]["predicted_per_second"].as_f64()
 }
 
+// Readiness gate for "online" status. hammer-api is what execute_job
+// actually talks to (not llama-server directly), and its own /health
+// already checks its upstream llama-server underneath - so this is the
+// one call that reflects whether the node can truly serve a request,
+// as opposed to benchmark() below, which only proves llama-server
+// itself is up.
+async fn hammer_api_healthy(client: &reqwest::Client, cfg: &Config) -> bool {
+    client
+        .get(format!("{}/health", cfg.local_hammer_api))
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .map(|resp| resp.status().is_success())
+        .unwrap_or(false)
+}
+
 // CPU/mem via sysinfo (cross-platform); temperature via the Linux
 // thermal zone file directly - sysinfo's component API is unreliable
 // across ARM boards, and this file is the one thing we already know
@@ -74,12 +92,13 @@ fn collect_metrics(sys: &mut System) -> Value {
     json!({"cpu_percent": cpu_percent, "mem_percent": mem_percent, "temp_c": temp_c})
 }
 
-async fn register(client: &reqwest::Client, cfg: &Config, benchmark_score: Option<f64>) -> Option<String> {
+async fn register(client: &reqwest::Client, cfg: &Config, status: &str) -> Option<String> {
     let body = json!({
         "name": cfg.node_name,
         "host_address": Option::<String>::None,
         "capabilities": [cfg.capability],
-        "hardware_metadata": {"cores": num_cpus::get()},
+        "hardware_metadata": {"cores": num_cpus::get(), "gpus": gpu::detect()},
+        "status": status,
     });
     let resp = client
         .post(format!("{}/nodes/register", cfg.hub_url))
@@ -89,18 +108,16 @@ async fn register(client: &reqwest::Client, cfg: &Config, benchmark_score: Optio
         .await
         .ok()?;
     let data: Value = resp.json().await.ok()?;
-    let node_id = data["node_id"].as_str()?.to_string();
+    Some(data["node_id"].as_str()?.to_string())
+}
 
-    if let Some(score) = benchmark_score {
-        let _ = client
-            .post(format!("{}/nodes/{}/heartbeat", cfg.hub_url, node_id))
-            .bearer_auth(&cfg.agent_token)
-            .json(&json!({"benchmark_tokens_per_sec": score}))
-            .send()
-            .await;
-    }
-
-    Some(node_id)
+async fn heartbeat(client: &reqwest::Client, cfg: &Config, node_id: &str, status: &str, benchmark_score: Option<f64>) {
+    let _ = client
+        .post(format!("{}/nodes/{}/heartbeat", cfg.hub_url, node_id))
+        .bearer_auth(&cfg.agent_token)
+        .json(&json!({"status": status, "benchmark_tokens_per_sec": benchmark_score}))
+        .send()
+        .await;
 }
 
 // Job payload contract: {"content": "<full user message text, including
@@ -149,11 +166,12 @@ async fn main() {
 
     println!("omnimesh-agent starting: node={} hub={}", cfg.node_name, cfg.hub_url);
 
-    println!("running local benchmark...");
-    let score = benchmark(&client, &cfg).await;
-    println!("benchmark: {:?} tok/s", score);
-
-    let node_id = match register(&client, &cfg, score).await {
+    // Register first, unconditionally "installing" - before probing
+    // anything. Installation (llama-server/model download, hammer-api
+    // venv setup - see scripts/install.ps1/.sh) may still be running at
+    // this point; the node must show up in the dashboard right away,
+    // but never as ready.
+    let node_id = match register(&client, &cfg, "installing").await {
         Some(id) => {
             println!("registered as node_id={}", id);
             id
@@ -163,6 +181,22 @@ async fn main() {
             return;
         }
     };
+
+    // Gate "online" on hammer-api's /health, not benchmark() - that's
+    // the actual request path execute_job uses, and its /health already
+    // checks llama-server underneath. Keep heartbeating meanwhile so
+    // the node doesn't look stale/dead in the dashboard, but never call
+    // /poll ("give me work") until this passes - the hub doesn't
+    // otherwise filter job assignment by node status.
+    while !hammer_api_healthy(&client, &cfg).await {
+        heartbeat(&client, &cfg, &node_id, "installing", None).await;
+        tokio::time::sleep(cfg.poll_interval).await;
+    }
+
+    println!("hammer-api healthy, running local benchmark...");
+    let score = benchmark(&client, &cfg).await;
+    println!("benchmark: {:?} tok/s, node ready", score);
+    heartbeat(&client, &cfg, &node_id, "online", score).await;
 
     let mut sys = System::new_all();
 

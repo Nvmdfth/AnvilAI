@@ -3,7 +3,7 @@ import { useMesh, type Job } from "./store";
 
 function statusColor(status: string) {
   if (status === "online" || status === "done") return "bg-green-500";
-  if (status === "assigned" || status === "running") return "bg-yellow-500";
+  if (status === "assigned" || status === "running" || status === "installing") return "bg-yellow-500";
   if (status === "failed" || status === "offline") return "bg-red-500";
   return "bg-gray-500";
 }

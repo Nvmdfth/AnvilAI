@@ -28,23 +28,30 @@ app.get("/health", (_req, res) => {
 // Node registration - upsert by name, so re-running an agent just
 // updates its own row instead of creating duplicates.
 app.post("/nodes/register", requireAuth, async (req, res) => {
-  const { name, host_address, capabilities, hardware_metadata } = req.body ?? {};
+  const { name, host_address, capabilities, hardware_metadata, status } = req.body ?? {};
   if (!name || !Array.isArray(capabilities)) {
     res.status(400).json({ error: "name and capabilities[] are required" });
     return;
   }
 
+  // Agents that aren't ready for work yet (e.g. still downloading
+  // llama-server/model on first install) report status: "installing"
+  // here instead of the default "online" - see main.rs's readiness
+  // probe. The heartbeat endpoint below is what refreshes last_seen_at
+  // while they wait; re-registering isn't required.
+  const initialStatus = status ?? "online";
+
   const result = await db.query(
     `INSERT INTO nodes (name, host_address, capabilities, hardware_metadata, status, last_seen_at)
-     VALUES ($1, $2, $3, $4, 'online', now())
+     VALUES ($1, $2, $3, $4, $5, now())
      ON CONFLICT (name) DO UPDATE SET
        host_address = EXCLUDED.host_address,
        capabilities = EXCLUDED.capabilities,
        hardware_metadata = EXCLUDED.hardware_metadata,
-       status = 'online',
+       status = EXCLUDED.status,
        last_seen_at = now()
      RETURNING *`,
-    [name, host_address ?? null, capabilities, hardware_metadata ?? {}]
+    [name, host_address ?? null, capabilities, hardware_metadata ?? {}, initialStatus]
   );
 
   broadcast("node", result.rows[0]);
@@ -58,13 +65,13 @@ app.get("/nodes", async (_req, res) => {
 
 // Heartbeat + benchmark report.
 app.post("/nodes/:id/heartbeat", requireAuth, async (req, res) => {
-  const { benchmark_tokens_per_sec } = req.body ?? {};
+  const { benchmark_tokens_per_sec, status } = req.body ?? {};
   const result = await db.query(
-    `UPDATE nodes SET status = 'online', last_seen_at = now(),
+    `UPDATE nodes SET status = $3, last_seen_at = now(),
        benchmark_tokens_per_sec = COALESCE($2, benchmark_tokens_per_sec),
        benchmark_updated_at = CASE WHEN $2 IS NOT NULL THEN now() ELSE benchmark_updated_at END
      WHERE id = $1 RETURNING *`,
-    [req.params.id, benchmark_tokens_per_sec ?? null]
+    [req.params.id, benchmark_tokens_per_sec ?? null, status ?? "online"]
   );
   if (result.rows[0]) broadcast("node", result.rows[0]);
   res.json({ ok: true });
