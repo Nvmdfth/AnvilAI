@@ -1,5 +1,7 @@
 import express, { type NextFunction, type Request, type Response } from "express";
+import { createServer } from "http";
 import { db } from "./db.js";
+import { attachWebSocket, broadcast } from "./broadcast.js";
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
@@ -41,23 +43,30 @@ app.post("/nodes/register", requireAuth, async (req, res) => {
        hardware_metadata = EXCLUDED.hardware_metadata,
        status = 'online',
        last_seen_at = now()
-     RETURNING id`,
+     RETURNING *`,
     [name, host_address ?? null, capabilities, hardware_metadata ?? {}]
   );
 
+  broadcast("node", result.rows[0]);
   res.json({ node_id: result.rows[0].id });
+});
+
+app.get("/nodes", async (_req, res) => {
+  const result = await db.query(`SELECT * FROM nodes ORDER BY name`);
+  res.json(result.rows);
 });
 
 // Heartbeat + benchmark report.
 app.post("/nodes/:id/heartbeat", requireAuth, async (req, res) => {
   const { benchmark_tokens_per_sec } = req.body ?? {};
-  await db.query(
+  const result = await db.query(
     `UPDATE nodes SET status = 'online', last_seen_at = now(),
        benchmark_tokens_per_sec = COALESCE($2, benchmark_tokens_per_sec),
        benchmark_updated_at = CASE WHEN $2 IS NOT NULL THEN now() ELSE benchmark_updated_at END
-     WHERE id = $1`,
+     WHERE id = $1 RETURNING *`,
     [req.params.id, benchmark_tokens_per_sec ?? null]
   );
+  if (result.rows[0]) broadcast("node", result.rows[0]);
   res.json({ ok: true });
 });
 
@@ -72,7 +81,11 @@ app.post("/nodes/:id/poll", requireAuth, async (req, res) => {
     return;
   }
 
-  await db.query(`UPDATE nodes SET status = 'online', last_seen_at = now() WHERE id = $1`, [nodeId]);
+  const nodeUpdate = await db.query(
+    `UPDATE nodes SET status = 'online', last_seen_at = now() WHERE id = $1 RETURNING *`,
+    [nodeId]
+  );
+  if (nodeUpdate.rows[0]) broadcast("node", nodeUpdate.rows[0]);
 
   const result = await db.query(
     `UPDATE jobs SET status = 'assigned', assigned_node_id = $2, assigned_at = now()
@@ -83,7 +96,7 @@ app.post("/nodes/:id/poll", requireAuth, async (req, res) => {
        FOR UPDATE SKIP LOCKED
        LIMIT 1
      )
-     RETURNING id, job_type, payload`,
+     RETURNING *`,
     [capability, nodeId]
   );
 
@@ -91,6 +104,7 @@ app.post("/nodes/:id/poll", requireAuth, async (req, res) => {
     res.status(204).end();
     return;
   }
+  broadcast("job", result.rows[0]);
   res.json(result.rows[0]);
 });
 
@@ -104,11 +118,17 @@ app.post("/jobs", async (req, res) => {
 
   const result = await db.query(
     `INSERT INTO jobs (job_type, required_capability, payload, priority)
-     VALUES ($1, $2, $3, $4) RETURNING id`,
+     VALUES ($1, $2, $3, $4) RETURNING *`,
     [job_type, required_capability, payload, priority ?? 0]
   );
 
+  broadcast("job", result.rows[0]);
   res.json({ job_id: result.rows[0].id });
+});
+
+app.get("/jobs", async (_req, res) => {
+  const result = await db.query(`SELECT * FROM jobs ORDER BY created_at DESC LIMIT 200`);
+  res.json(result.rows);
 });
 
 app.get("/jobs/:id", async (req, res) => {
@@ -128,15 +148,18 @@ app.post("/jobs/:id/result", requireAuth, async (req, res) => {
     return;
   }
 
-  await db.query(
-    `UPDATE jobs SET status = $2, result = $3, error = $4, completed_at = now() WHERE id = $1`,
+  const result = await db.query(
+    `UPDATE jobs SET status = $2, result = $3, error = $4, completed_at = now() WHERE id = $1 RETURNING *`,
     [req.params.id, status, jobResult ?? null, error ?? null]
   );
 
+  if (result.rows[0]) broadcast("job", result.rows[0]);
   res.json({ ok: true });
 });
 
 const port = Number(process.env.PORT ?? 4000);
-app.listen(port, () => {
-  console.log(`omnimesh-hub listening on :${port}`);
+const httpServer = createServer(app);
+attachWebSocket(httpServer);
+httpServer.listen(port, () => {
+  console.log(`omnimesh-hub listening on :${port} (ws at /ws)`);
 });

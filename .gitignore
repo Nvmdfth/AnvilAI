@@ -6,4 +6,5 @@ __pycache__/
 logs/
 node_modules/
 omnimesh/hub/dist/
+omnimesh/dashboard/dist/
 target/
