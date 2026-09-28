@@ -9,7 +9,7 @@ services:
       - "5432:5432"
     volumes:
       - omnimesh-db-data:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d:ro
+      - ./hub/migrations:/docker-entrypoint-initdb.d:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U omnimesh"]
@@ -18,7 +18,7 @@ services:
       retries: 10
 
   omnimesh-hub:
-    build: .
+    build: ./hub
     depends_on:
       omnimesh-db:
         condition: service_healthy
@@ -28,6 +28,14 @@ services:
       PORT: "4000"
     ports:
       - "4000:4000"
+    restart: unless-stopped
+
+  omnimesh-dashboard:
+    build: ./dashboard
+    depends_on:
+      - omnimesh-hub
+    ports:
+      - "5173:80"
     restart: unless-stopped
 
 volumes:

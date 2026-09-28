@@ -9,10 +9,13 @@ infra (Proxmox/Unraid agents, incidents) yet.
 
 ```
 control-plane/      Decides who does work - never runs generation itself.
+  docker-compose.yml Runs all three below together: Postgres, hub, dashboard.
   hub/               Node/Express API + Postgres. Job queue, node
                      registry, WebSocket push.
   dashboard/         React/Vite/Tailwind/Zustand UI - node matrix, job
                      stream, per-node config/metrics detail panel.
+                     Dockerfile builds a static bundle served via nginx,
+                     which proxies /api and /ws to the hub container.
 
 client/              Runs on a worker node and actually does the work.
   agent/             Rust worker agent. Registers with the hub,
@@ -30,13 +33,17 @@ client/              Runs on a worker node and actually does the work.
 ## Running the control plane
 
 ```
-cd control-plane/hub
+cd control-plane
 cp .env.example .env   # set a real AGENT_TOKEN
 docker compose up -d --build
 ```
 
-Starts Postgres (migrations auto-applied) and the hub API on
-`localhost:4000`. REST + WebSocket (`/ws`) on the same port.
+Starts Postgres (migrations auto-applied), the hub API on `localhost:4000`
+(REST + WebSocket `/ws` on the same port), and the dashboard on
+`localhost:5173` (a static build served via nginx, which proxies `/api`
+and `/ws` to the hub container - see `dashboard/nginx.conf`).
+
+### Dashboard dev server (hot reload, no Docker)
 
 ```
 cd control-plane/dashboard

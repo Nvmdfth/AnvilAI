@@ -87,6 +87,7 @@ function NodeDetail() {
   if (!node) return null;
 
   async function handleSave() {
+    if (!node) return;
     await updateNodeConfig(
       node.id,
       {
