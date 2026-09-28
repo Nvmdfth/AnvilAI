@@ -120,17 +120,28 @@ async fn heartbeat(client: &reqwest::Client, cfg: &Config, node_id: &str, status
         .await;
 }
 
-// Job payload contract: {"content": "<full user message text, including
-// any ```test fence the submitter wants hammer-api to see>"}. The agent
-// is a dumb proxy - it doesn't know or care what's inside `content`.
-// node_config's `hammer_passes` (dashboard-tunable, see Omnimesh.md
-// node-detail panel) overrides the hammer-api default. `temperature_min`/
-// `temperature_max` are stored in config too but not wired up yet -
-// hammer_code's temperature escalation is still hardcoded in hammer.py,
-// so setting them here would be a config field with no real effect.
+// Job payload contract, either shape:
+//   {"content": "<full user message text, including any ```test fence
+//     the submitter wants hammer-api to see>"} - legacy/dashboard shape,
+//     wrapped as a single user message.
+//   {"messages": [{"role", "content"}, ...]} - full conversation, as
+//     sent verbatim by the hub's /v1/chat/completions (server.ts) for
+//     OpenAI-client compatibility (system prompts, multi-turn history).
+// The agent is a dumb proxy either way - it doesn't inspect message
+// content itself. node_config's `hammer_passes` (dashboard-tunable, see
+// Omnimesh.md node-detail panel) overrides the hammer-api default.
+// `temperature_min`/`temperature_max` are stored in config too but not
+// wired up yet - hammer_code's temperature escalation is still
+// hardcoded in hammer.py, so setting them here would be a config field
+// with no real effect.
 async fn execute_job(client: &reqwest::Client, cfg: &Config, payload: &Value, node_config: &Value) -> Result<Value, String> {
-    let content = payload["content"].as_str().ok_or("payload.content missing")?;
-    let mut body = json!({"messages": [{"role": "user", "content": content}]});
+    let messages = if payload["messages"].is_array() {
+        payload["messages"].clone()
+    } else {
+        let content = payload["content"].as_str().ok_or("payload.content or payload.messages required")?;
+        json!([{"role": "user", "content": content}])
+    };
+    let mut body = json!({"messages": messages});
     if let Some(passes) = node_config["hammer_passes"].as_i64() {
         body["passes"] = json!(passes);
     }

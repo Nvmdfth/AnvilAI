@@ -43,6 +43,22 @@ Starts Postgres (migrations auto-applied), the hub API on `localhost:4000`
 `localhost:5173` (a static build served via nginx, which proxies `/api`
 and `/ws` to the hub container - see `dashboard/nginx.conf`).
 
+### OpenAI-compatible interface
+
+`POST /v1/chat/completions` on the hub takes a standard OpenAI chat
+request (`model`, `messages[]`, optional `stream`) and does the queuing
+for you: it creates a job, blocks until some node reports a result, and
+relays that result back - already OpenAI-shaped, since that's what
+hammer-api itself returns. Point any OpenAI-compatible client (VS Code
+extensions included) at `http://<hub>:4000/v1`, API key = `AGENT_TOKEN`.
+
+`stream: true` doesn't stream incrementally - the hammer loop only has
+an answer after several full generate/verify passes, so there's nothing
+to stream token-by-token. It's faked as a single SSE chunk instead, so
+clients that always request streaming don't break. Default wait is 10
+minutes (`CHAT_JOB_TIMEOUT_MS` env) before a `504`; the job itself isn't
+lost, it can still finish and show up via `GET /jobs/:id`.
+
 ### Dashboard dev server (hot reload, no Docker)
 
 ```

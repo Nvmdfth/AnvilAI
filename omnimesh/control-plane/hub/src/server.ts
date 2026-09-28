@@ -6,6 +6,12 @@ import { attachWebSocket, broadcast } from "./broadcast.js";
 const app = express();
 app.use(express.json({ limit: "10mb" }));
 
+// In-process wake-up for /v1/chat/completions's blocking wait - avoids
+// polling the DB. A single hub instance only (no horizontal scaling
+// today), so an in-memory map is sufficient; a multi-instance hub would
+// need this to move to LISTEN/NOTIFY or similar.
+const jobWaiters = new Map<string, { resolve: (job: Record<string, unknown>) => void }>();
+
 // MVP auth: a single shared bearer token for every node. Real per-node
 // bootstrap tokens (Omnimesh.md §7) come once there's more than one
 // node and per-node revocation actually matters.
@@ -193,8 +199,104 @@ app.post("/jobs/:id/result", requireAuth, async (req, res) => {
     [req.params.id, status, jobResult ?? null, error ?? null]
   );
 
-  if (result.rows[0]) broadcast("job", result.rows[0]);
+  if (result.rows[0]) {
+    broadcast("job", result.rows[0]);
+    const waiter = jobWaiters.get(req.params.id);
+    if (waiter) {
+      jobWaiters.delete(req.params.id);
+      waiter.resolve(result.rows[0]);
+    }
+  }
   res.json({ ok: true });
+});
+
+// OpenAI-compatible entry point - point any OpenAI client (VS Code
+// extensions included) at http://<hub>:4000/v1, API key = AGENT_TOKEN.
+// Translates the request into a plain job, blocks until a node reports
+// a result via /jobs/:id/result (jobWaiters above), and relays that
+// result back - it's already OpenAI-shaped, since that's what
+// hammer-api's own /v1/chat/completions returns (see engine/api.py).
+const CHAT_JOB_TIMEOUT_MS = Number(process.env.CHAT_JOB_TIMEOUT_MS ?? 600_000);
+
+app.post("/v1/chat/completions", requireAuth, async (req, res) => {
+  const { model, messages, stream } = req.body ?? {};
+  if (!Array.isArray(messages) || messages.length === 0) {
+    res.status(400).json({ error: { message: "messages[] is required", type: "invalid_request_error" } });
+    return;
+  }
+
+  const insertResult = await db.query(
+    `INSERT INTO jobs (job_type, required_capability, payload, priority)
+     VALUES ('llm_generation', 'llm_generation', $1, 0) RETURNING *`,
+    [{ messages }]
+  );
+  const job = insertResult.rows[0];
+  broadcast("job", job);
+
+  const donePromise = new Promise<Record<string, unknown>>((resolve) => {
+    jobWaiters.set(job.id, { resolve });
+  });
+  const timeoutPromise = new Promise<"timeout">((resolve) =>
+    setTimeout(() => resolve("timeout"), CHAT_JOB_TIMEOUT_MS)
+  );
+
+  const outcome = await Promise.race([donePromise, timeoutPromise]);
+  if (outcome === "timeout") {
+    jobWaiters.delete(job.id);
+    res.status(504).json({
+      error: {
+        message: `job ${job.id} did not complete within ${CHAT_JOB_TIMEOUT_MS}ms - it may still finish; check GET /jobs/${job.id}`,
+        type: "timeout_error",
+      },
+    });
+    return;
+  }
+
+  const finishedJob = outcome;
+  if (finishedJob.status === "failed") {
+    res.status(502).json({ error: { message: String(finishedJob.error ?? "job failed"), type: "server_error" } });
+    return;
+  }
+
+  // hammer-api's response is already OpenAI chat-completion shaped -
+  // relay it, just echoing back whatever model name the client asked for.
+  const result = finishedJob.result as Record<string, unknown>;
+  const body = { ...result, model: model ?? result.model };
+
+  if (!stream) {
+    res.json(body);
+    return;
+  }
+
+  // Faked streaming: the hammer loop only produces a final answer after
+  // several full generate/verify passes, so there's nothing meaningful
+  // to stream incrementally - emit the whole thing as one SSE chunk so
+  // clients that always request stream: true (many do by default) still
+  // get a response shaped the way they expect, instead of erroring on a
+  // stray non-SSE body.
+  const choice = (body as any).choices?.[0];
+  const chunk = {
+    id: result.id,
+    object: "chat.completion.chunk",
+    created: result.created,
+    model: body.model,
+    choices: [{ index: 0, delta: { role: "assistant", content: choice?.message?.content ?? "" }, finish_reason: null }],
+  };
+  const finalChunk = {
+    id: result.id,
+    object: "chat.completion.chunk",
+    created: result.created,
+    model: body.model,
+    choices: [{ index: 0, delta: {}, finish_reason: choice?.finish_reason ?? "stop" }],
+  };
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+  res.write(`data: ${JSON.stringify(finalChunk)}\n\n`);
+  res.write("data: [DONE]\n\n");
+  res.end();
 });
 
 const port = Number(process.env.PORT ?? 4000);
