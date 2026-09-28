@@ -16,18 +16,28 @@ The name comes from the approach: repeated, cheap passes over a small model
 ## Layout
 
 ```
-docker/     Dockerfile(s) for the llama.cpp server build
-models/     GGUF model files (gitignored, mount or download at runtime)
-src/        Orchestration layer (iterative passes, prompting logic)
-scripts/    Helper scripts (model download, entrypoint, etc.)
+docker/                Dockerfile(s) for the llama.cpp server build
+models/                GGUF model files (gitignored, mount or download at runtime)
+src/                   Orchestration layer (hammer loop, API wrapper, sandboxing)
+scripts/entrypoint.sh  Container entrypoint for llama-server
+scripts/install.sh     Standalone Linux installer - no Docker (see below)
+scripts/build_website.py  Standalone website-builder test tool (see below)
+Omnimesh.md            Design doc for a future distributed job mesh - not implemented yet
 ```
 
 ## Status
 
-`hammer_code` (multi-pass generate-test-refine loop) plus an OpenAI-compatible
-HTTP wrapper around it.
+`hammer_code` / `hammer_html` (multi-pass generate-test-refine loops) plus an
+OpenAI-compatible HTTP wrapper, a standalone website-builder tool, and a
+Docker-free Linux installer. `Omnimesh.md` sketches a future control plane
+for distributing jobs across multiple nodes; nothing in that doc is built
+yet — everything below runs on a single machine.
 
 ## Running
+
+Two ways to run this, same containers/services either way:
+
+### Docker (development)
 
 ```
 docker compose up --build
@@ -40,6 +50,22 @@ This starts two containers:
   match.
 - `hammer-api` — an OpenAI-compatible wrapper on `localhost:8001` that runs
   requests through the hammer loop (see below).
+
+### Standalone installer (no Docker)
+
+```
+curl -sSL https://raw.githubusercontent.com/Nvmdfth/AnvilAI/main/scripts/install.sh | sudo bash
+```
+
+Detects an NVIDIA or Vulkan-capable GPU and uses it if present, otherwise
+falls back to CPU. Downloads a prebuilt `llama-server` binary (no source
+compile), the default model, and installs both `llama-server` and
+`hammer-api` as system-level `systemd` services under `/opt/anvilai`,
+running as `nobody` — survives reboot and logout, no active session needed.
+Same ports (`8080`/`8001`) and same API as the Docker path. Linux only —
+CUDA/Vulkan backend paths are implemented but need a GPU to verify; CPU
+backend is confirmed working. A Windows installer is planned but not
+written yet.
 
 ## API
 
@@ -108,6 +134,31 @@ help; a bigger/less-quantized model or clearer tests will. Confirmed by
 testing: a 1.5B q4 model correctly resolves a "stuck" failure once told which
 exact assertion it keeps failing, but a subset of edge-case bugs (e.g. empty
 input handling) need that explicit callout, not just more passes.
+
+## Standalone website builder
+
+`scripts/build_website.py` runs the same generate/verify/retry pattern as
+`hammer_code`, but for a single-file HTML page instead of a Python function.
+It talks directly to `llama-server` — not through `hammer-api` — and writes
+the result straight to a directory:
+
+```bash
+python3 scripts/build_website.py "<task description>" <checks_file> <output_dir>
+```
+
+`<checks_file>` is a `.py` file of assertions checked against a string
+variable named `html`, e.g.:
+
+```python
+assert '<h1>' in html
+assert 'Contact' in html
+```
+
+Verification is HTML well-formedness (matched opening/closing tags) plus
+those assertions. Output lands at `<output_dir>/index.html`; passes are
+logged to `logs/` the same way `hammer_code` passes are, so the same `jq`
+queries above work on website-build logs too. Runs to completion and exits
+— no server, no Claude Code involvement needed once it's kicked off.
 
 ## CLI / library use
 
