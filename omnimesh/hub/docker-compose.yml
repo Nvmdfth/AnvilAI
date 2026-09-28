@@ -11,6 +11,24 @@ services:
       - omnimesh-db-data:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d:ro
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omnimesh"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  omnimesh-hub:
+    build: .
+    depends_on:
+      omnimesh-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://omnimesh:omnimesh@omnimesh-db:5432/omnimesh
+      AGENT_TOKEN: ${AGENT_TOKEN:-dev-only-token}
+      PORT: "4000"
+    ports:
+      - "4000:4000"
+    restart: unless-stopped
 
 volumes:
   omnimesh-db-data:
