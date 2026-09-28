@@ -15,14 +15,23 @@ The name comes from the approach: repeated, cheap passes over a small model
 
 ## Layout
 
+This repo is now split along a control-plane/client line (see
+`omnimesh/README.md`). Everything below - the actual generation engine -
+is client/worker software; it's what a node runs, whether or not that
+node is also wired into the OmniMesh hub.
+
 ```
-docker/                Dockerfile(s) for the llama.cpp server build
-models/                GGUF model files (gitignored, mount or download at runtime)
-src/                   Orchestration layer (hammer loop, API wrapper, sandboxing)
-scripts/entrypoint.sh  Container entrypoint for llama-server
-scripts/install.sh     Standalone Linux installer - no Docker (see below)
-scripts/build_website.py  Standalone website-builder test tool (see below)
-Omnimesh.md            Design doc for a future distributed job mesh - not implemented yet
+omnimesh/client/docker/                Dockerfile(s) for the llama.cpp server build
+omnimesh/client/models/                GGUF model files (gitignored, mount or download at runtime)
+omnimesh/client/engine/                Orchestration layer (hammer loop, API wrapper, sandboxing)
+omnimesh/client/scripts/entrypoint.sh  Container entrypoint for llama-server
+omnimesh/client/scripts/install.sh     Standalone Linux installer - no Docker (see below)
+omnimesh/client/scripts/install.ps1    Standalone Windows installer - no Docker (see below)
+scripts/build_website.py               Standalone website-builder test tool (see below) - not
+                                        node/worker software, stays at repo root
+omnimesh/                              Distributed control plane (hub + dashboard) and the
+                                        worker agent that talks to it - see omnimesh/README.md
+Omnimesh.md                            Design doc for the distributed job mesh
 ```
 
 ## Status
@@ -40,21 +49,22 @@ Two ways to run this, same containers/services either way:
 ### Docker (development)
 
 ```
+cd omnimesh/client
 docker compose up --build
 ```
 
 This starts two containers:
 
 - `llama-server` — the llama.cpp HTTP API on `localhost:8080`. Place a GGUF
-  model in `models/` and set `MODEL_FILE` in `.env` (see `.env.example`) to
-  match.
+  model in `omnimesh/client/models/` and set `MODEL_FILE` in `.env` (see
+  `omnimesh/client/.env.example`) to match.
 - `hammer-api` — an OpenAI-compatible wrapper on `localhost:8001` that runs
   requests through the hammer loop (see below).
 
 ### Standalone installer (no Docker)
 
 ```
-curl -sSL https://raw.githubusercontent.com/Nvmdfth/AnvilAI/main/scripts/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/Nvmdfth/AnvilAI/main/omnimesh/client/scripts/install.sh | sudo bash
 ```
 
 Detects an NVIDIA or Vulkan-capable GPU and uses it if present, otherwise
@@ -62,10 +72,11 @@ falls back to CPU. Downloads a prebuilt `llama-server` binary (no source
 compile), the default model, and installs both `llama-server` and
 `hammer-api` as system-level `systemd` services under `/opt/anvilai`,
 running as `nobody` — survives reboot and logout, no active session needed.
-Same ports (`8080`/`8001`) and same API as the Docker path. Linux only —
-CUDA/Vulkan backend paths are implemented but need a GPU to verify; CPU
-backend is confirmed working. A Windows installer is planned but not
-written yet.
+Same ports (`8080`/`8001`) and same API as the Docker path. CUDA/Vulkan
+backend paths are confirmed working on both Linux and Windows (GPU-
+verified). `omnimesh/client/scripts/install.ps1` is the Windows
+equivalent (`irm .../omnimesh/client/scripts/install.ps1 | iex`), using
+Scheduled Tasks instead of systemd for persistence.
 
 ## API
 
@@ -163,6 +174,6 @@ queries above work on website-build logs too. Runs to completion and exits
 ## CLI / library use
 
 `hammer_code(task, test_code, passes=5, client=None, verbose=False,
-on_pass=None)` in `src/hammer.py` can be called directly. `verbose=True`
+on_pass=None)` in `omnimesh/client/engine/hammer.py` can be called directly. `verbose=True`
 prints each pass to stdout; `on_pass` takes a callback (used by the API to
 write the JSONL logs) for programmatic use.

@@ -23,7 +23,7 @@ services:
       LLAMA_BASE_URL: http://llama-server:8080
       HAMMER_PASSES: "5"
     volumes:
-      - ./logs:/app/src/logs
+      - ./logs:/app/engine/logs
     ports:
       - "8001:8000"
     restart: unless-stopped

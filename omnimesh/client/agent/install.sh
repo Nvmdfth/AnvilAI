@@ -1,14 +1,14 @@
 #!/bin/bash
 # Installs omnimesh-agent as a systemd service on this Linux node.
-# Run from inside omnimesh/agent/ in a cloned copy of this repo:
+# Run from inside omnimesh/client/agent/ in a cloned copy of this repo:
 #
 #   sudo ./install.sh
 #
 # Builds from source (needs a Rust toolchain - rustup recommended, see
-# AnvilAI's scripts/install.sh for why the Debian-packaged rustc alone
-# wasn't new enough here). There's no prebuilt-binary release pipeline
-# for this agent yet, unlike llama.cpp's upstream releases used by the
-# AnvilAI installer.
+# omnimesh/client/scripts/install.sh for why the Debian-packaged rustc
+# alone wasn't new enough here). There's no prebuilt-binary release
+# pipeline for this agent yet, unlike llama.cpp's upstream releases
+# used by that installer.
 set -euo pipefail
 
 if [ "$(id -u)" -ne 0 ]; then

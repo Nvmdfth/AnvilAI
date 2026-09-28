@@ -1,7 +1,7 @@
 # AnvilAI standalone installer (Windows).
 #
 # Usage (from an elevated or regular PowerShell - no admin required):
-#   irm https://raw.githubusercontent.com/Nvmdfth/AnvilAI.git/main/scripts/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/Nvmdfth/AnvilAI.git/main/omnimesh/client/scripts/install.ps1 | iex
 #
 # Installs a prebuilt llama-server (GPU backend if detected, else CPU),
 # the default model, and hammer-api under %LOCALAPPDATA%\AnvilAI, and
@@ -13,7 +13,7 @@ $ErrorActionPreference = "Stop"
 $InstallDir = "$env:LOCALAPPDATA\AnvilAI"
 $RepoUrl = "https://github.com/Nvmdfth/AnvilAI.git"
 
-# Pinned llama.cpp release build - keep in sync with scripts/install.sh's
+# Pinned llama.cpp release build - keep in sync with install.sh's
 # LLAMA_RELEASE_TAG. llama.cpp ships many non-semver (b#####) builds a
 # day; bump deliberately after testing, don't chase latest.
 $LlamaReleaseTag = "b11232"
@@ -108,7 +108,7 @@ python -m venv "$InstallDir\venv"
 # Upgrading pip via pip.exe itself fails on Windows (can't replace its
 # own running executable) - go through python.exe -m pip instead.
 & "$InstallDir\venv\Scripts\python.exe" -m pip install --quiet --upgrade pip
-& "$InstallDir\venv\Scripts\pip.exe" install --quiet -r "$InstallDir\src\requirements.txt"
+& "$InstallDir\venv\Scripts\pip.exe" install --quiet -r "$InstallDir\src\omnimesh\client\requirements.txt"
 
 # --n-gpu-layers offloads all layers to GPU on the cuda/vulkan backends.
 # NOTE: install.sh (Linux) does not currently set this flag despite
@@ -137,7 +137,7 @@ while (-not (Test-NetConnection -ComputerName localhost -Port $LlamaPort -Warnin
 `$env:LLAMA_BASE_URL = "http://localhost:$LlamaPort"
 `$env:HAMMER_LOG_DIR = "$InstallDir\logs"
 while (`$true) {
-    Push-Location "$InstallDir\src\src"
+    Push-Location "$InstallDir\src\omnimesh\client\engine"
     & "$InstallDir\venv\Scripts\uvicorn.exe" api:app --host 0.0.0.0 --port $HammerPort *>> "$InstallDir\logs\hammer.log"
     Pop-Location
     Add-Content "$InstallDir\logs\hammer.log" "--- hammer-api exited, restarting in 5s ---"

@@ -168,7 +168,7 @@ async fn main() {
 
     // Register first, unconditionally "installing" - before probing
     // anything. Installation (llama-server/model download, hammer-api
-    // venv setup - see scripts/install.ps1/.sh) may still be running at
+    // venv setup - see ../scripts/install.ps1/.sh) may still be running at
     // this point; the node must show up in the dashboard right away,
     // but never as ready.
     let node_id = match register(&client, &cfg, "installing").await {

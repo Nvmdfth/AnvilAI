@@ -257,9 +257,10 @@ containerized) plus a thin Rust agent that:
    the hub as the job's `result`.
 
 This means adding a node to the mesh for generation work is: run the
-existing `docker compose up` from this repo, plus one Rust binary that
-knows the hub's URL and its own bootstrap token. Nothing in `src/hammer.py`,
-`src/api.py`, or `scripts/build_website.py` needs to change for this.
+existing `docker compose up` from `omnimesh/client/`, plus one Rust
+binary that knows the hub's URL and its own bootstrap token. Nothing in
+`omnimesh/client/engine/hammer.py`, `omnimesh/client/engine/api.py`, or
+the standalone `scripts/build_website.py` needs to change for this.
 
 ## 5. Frontend Dashboard
 
@@ -316,9 +317,9 @@ simpler mechanism can provide without the certificate lifecycle:
 ## 8. Deployment Strategy & Docker Compose
 
 Central hub deployment is unchanged from v2 (Postgres + Node/Express hub +
-React dashboard). An AnvilAI-capable node's compose file is simply *this
-repo's existing `docker-compose.yml`* (`llama-server` + `hammer-api`) with
-one more service added — the Rust agent — pointed at the hub:
+React dashboard). An AnvilAI-capable node's compose file is simply
+*`omnimesh/client/docker-compose.yml`* (`llama-server` + `hammer-api`)
+with one more service added — the Rust agent — pointed at the hub:
 
 ```yaml
   omnimesh-agent:

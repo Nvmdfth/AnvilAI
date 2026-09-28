@@ -2,7 +2,7 @@
 # AnvilAI standalone installer (Linux).
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/Nvmdfth/AnvilAI/main/scripts/install.sh | sudo bash
+#   curl -sSL https://raw.githubusercontent.com/Nvmdfth/AnvilAI/main/omnimesh/client/scripts/install.sh | sudo bash
 #
 # Installs a prebuilt llama-server (GPU backend if detected, else CPU),
 # the default model, and hammer-api, all as system-level systemd
@@ -86,7 +86,7 @@ fi
 echo "--> Setting up hammer-api virtualenv..."
 python3 -m venv "$INSTALL_DIR/venv"
 "$INSTALL_DIR/venv/bin/pip" install --quiet --upgrade pip
-"$INSTALL_DIR/venv/bin/pip" install --quiet -r "$INSTALL_DIR/src/requirements.txt"
+"$INSTALL_DIR/venv/bin/pip" install --quiet -r "$INSTALL_DIR/src/omnimesh/client/requirements.txt"
 
 echo "--> Writing systemd units..."
 cat > /etc/systemd/system/anvilai-llama.service <<EOF
@@ -113,7 +113,7 @@ After=anvilai-llama.service
 Requires=anvilai-llama.service
 
 [Service]
-WorkingDirectory=$INSTALL_DIR/src/src
+WorkingDirectory=$INSTALL_DIR/src/omnimesh/client/engine
 Environment=LLAMA_BASE_URL=http://localhost:$LLAMA_PORT
 Environment=HAMMER_LOG_DIR=$INSTALL_DIR/logs
 ExecStart=$INSTALL_DIR/venv/bin/uvicorn api:app --host 0.0.0.0 --port $HAMMER_PORT

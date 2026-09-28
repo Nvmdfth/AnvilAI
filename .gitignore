@@ -1,10 +1,10 @@
-models/*.gguf
+omnimesh/client/models/*.gguf
 .env
 *.log
 __pycache__/
 .venv/
 logs/
 node_modules/
-omnimesh/hub/dist/
-omnimesh/dashboard/dist/
+omnimesh/control-plane/hub/dist/
+omnimesh/control-plane/dashboard/dist/
 target/

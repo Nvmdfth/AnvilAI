@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use std::process::Command;
 
-// Windows-only for now (see ../README.md's "Windows" section - no
+// Windows-only for now (see omnimesh/README.md's "Windows" section - no
 // install flow existed at all until this change). Linux nodes are
 // GPU-less Pis today; cross-platform detection can follow when that
 // changes.
