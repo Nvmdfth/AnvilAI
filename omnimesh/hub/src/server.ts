@@ -75,17 +75,23 @@ app.post("/nodes/:id/heartbeat", requireAuth, async (req, res) => {
 // subquery, so two nodes polling at once can't grab the same job.
 app.post("/nodes/:id/poll", requireAuth, async (req, res) => {
   const nodeId = req.params.id;
-  const { capability } = req.body ?? {};
+  const { capability, metrics } = req.body ?? {};
   if (!capability) {
     res.status(400).json({ error: "capability is required" });
     return;
   }
 
+  // Piggyback live resource metrics on the poll the agent already does
+  // every few seconds, instead of a second reporting loop.
   const nodeUpdate = await db.query(
-    `UPDATE nodes SET status = 'online', last_seen_at = now() WHERE id = $1 RETURNING *`,
-    [nodeId]
+    `UPDATE nodes SET status = 'online', last_seen_at = now(),
+       latest_metrics = COALESCE($2::jsonb, latest_metrics),
+       metrics_updated_at = CASE WHEN $2::jsonb IS NOT NULL THEN now() ELSE metrics_updated_at END
+     WHERE id = $1 RETURNING *`,
+    [nodeId, metrics ? JSON.stringify(metrics) : null]
   );
   if (nodeUpdate.rows[0]) broadcast("node", nodeUpdate.rows[0]);
+  const nodeConfig = nodeUpdate.rows[0]?.config ?? {};
 
   const result = await db.query(
     `UPDATE jobs SET status = 'assigned', assigned_node_id = $2, assigned_at = now()
@@ -105,6 +111,33 @@ app.post("/nodes/:id/poll", requireAuth, async (req, res) => {
     return;
   }
   broadcast("job", result.rows[0]);
+  // Send the node's current config along so the agent can apply
+  // overrides (e.g. hammer_passes) without a separate fetch.
+  res.json({ ...result.rows[0], node_config: nodeConfig });
+});
+
+// Dashboard edits a node's tunable config (hammer params, scheduler
+// weight) or its capabilities/priority. Partial update - only given
+// fields change.
+app.patch("/nodes/:id/config", async (req, res) => {
+  const { config, capabilities, priority_weight } = req.body ?? {};
+
+  const mergedConfig = { ...(config ?? {}) };
+  if (priority_weight !== undefined) mergedConfig.priority_weight = priority_weight;
+
+  const result = await db.query(
+    `UPDATE nodes SET
+       config = config || $2::jsonb,
+       capabilities = COALESCE($3, capabilities)
+     WHERE id = $1 RETURNING *`,
+    [req.params.id, JSON.stringify(mergedConfig), capabilities ?? null]
+  );
+
+  if (result.rows.length === 0) {
+    res.status(404).json({ error: "not found" });
+    return;
+  }
+  broadcast("node", result.rows[0]);
   res.json(result.rows[0]);
 });
 

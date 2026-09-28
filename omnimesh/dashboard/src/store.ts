@@ -1,5 +1,18 @@
 import { create } from "zustand";
 
+export interface NodeConfig {
+  hammer_passes?: number;
+  temperature_min?: number;
+  temperature_max?: number;
+  priority_weight?: number;
+}
+
+export interface NodeMetrics {
+  cpu_percent: number;
+  mem_percent: number;
+  temp_c: number | null;
+}
+
 export interface Node {
   id: string;
   name: string;
@@ -10,6 +23,9 @@ export interface Node {
   benchmark_tokens_per_sec: number | null;
   benchmark_updated_at: string | null;
   last_seen_at: string | null;
+  config: NodeConfig;
+  latest_metrics: NodeMetrics | null;
+  metrics_updated_at: string | null;
 }
 
 export interface Job {
@@ -31,15 +47,29 @@ interface MeshState {
   nodes: Record<string, Node>;
   jobs: Record<string, Job>;
   connected: boolean;
+  selectedNodeId: string | null;
   init: () => Promise<void>;
   connectWs: () => void;
   submitJob: (content: string) => Promise<void>;
+  selectNode: (id: string | null) => void;
+  updateNodeConfig: (id: string, config: NodeConfig, capabilities?: string[]) => Promise<void>;
 }
 
 export const useMesh = create<MeshState>((set, get) => ({
   nodes: {},
   jobs: {},
   connected: false,
+  selectedNodeId: null,
+
+  selectNode: (id) => set({ selectedNodeId: id }),
+
+  updateNodeConfig: async (id, config, capabilities) => {
+    await fetch(`/api/nodes/${id}/config`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ config, capabilities }),
+    });
+  },
 
   init: async () => {
     const [nodesRes, jobsRes] = await Promise.all([fetch("/api/nodes"), fetch("/api/jobs")]);

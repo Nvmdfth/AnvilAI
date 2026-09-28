@@ -1,6 +1,8 @@
 use serde_json::{json, Value};
 use std::env;
+use std::fs;
 use std::time::Duration;
+use sysinfo::System;
 
 struct Config {
     hub_url: String,
@@ -50,6 +52,28 @@ async fn benchmark(client: &reqwest::Client, cfg: &Config) -> Option<f64> {
     data["timings"]["predicted_per_second"].as_f64()
 }
 
+// CPU/mem via sysinfo (cross-platform); temperature via the Linux
+// thermal zone file directly - sysinfo's component API is unreliable
+// across ARM boards, and this file is the one thing we already know
+// exists on this exact hardware.
+fn collect_metrics(sys: &mut System) -> Value {
+    sys.refresh_cpu_usage();
+    sys.refresh_memory();
+
+    let cpu_percent = sys.global_cpu_usage();
+    let mem_percent = if sys.total_memory() > 0 {
+        (sys.used_memory() as f64 / sys.total_memory() as f64) * 100.0
+    } else {
+        0.0
+    };
+    let temp_c = fs::read_to_string("/sys/class/thermal/thermal_zone0/temp")
+        .ok()
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .map(|milli_c| milli_c / 1000.0);
+
+    json!({"cpu_percent": cpu_percent, "mem_percent": mem_percent, "temp_c": temp_c})
+}
+
 async fn register(client: &reqwest::Client, cfg: &Config, benchmark_score: Option<f64>) -> Option<String> {
     let body = json!({
         "name": cfg.node_name,
@@ -82,9 +106,17 @@ async fn register(client: &reqwest::Client, cfg: &Config, benchmark_score: Optio
 // Job payload contract: {"content": "<full user message text, including
 // any ```test fence the submitter wants hammer-api to see>"}. The agent
 // is a dumb proxy - it doesn't know or care what's inside `content`.
-async fn execute_job(client: &reqwest::Client, cfg: &Config, payload: &Value) -> Result<Value, String> {
+// node_config's `hammer_passes` (dashboard-tunable, see Omnimesh.md
+// node-detail panel) overrides the hammer-api default. `temperature_min`/
+// `temperature_max` are stored in config too but not wired up yet -
+// hammer_code's temperature escalation is still hardcoded in hammer.py,
+// so setting them here would be a config field with no real effect.
+async fn execute_job(client: &reqwest::Client, cfg: &Config, payload: &Value, node_config: &Value) -> Result<Value, String> {
     let content = payload["content"].as_str().ok_or("payload.content missing")?;
-    let body = json!({"messages": [{"role": "user", "content": content}]});
+    let mut body = json!({"messages": [{"role": "user", "content": content}]});
+    if let Some(passes) = node_config["hammer_passes"].as_i64() {
+        body["passes"] = json!(passes);
+    }
 
     let resp = client
         .post(format!("{}/v1/chat/completions", cfg.local_hammer_api))
@@ -132,11 +164,14 @@ async fn main() {
         }
     };
 
+    let mut sys = System::new_all();
+
     loop {
+        let metrics = collect_metrics(&mut sys);
         let poll_resp = client
             .post(format!("{}/nodes/{}/poll", cfg.hub_url, node_id))
             .bearer_auth(&cfg.agent_token)
-            .json(&json!({"capability": cfg.capability}))
+            .json(&json!({"capability": cfg.capability, "metrics": metrics}))
             .send()
             .await;
 
@@ -148,8 +183,9 @@ async fn main() {
                 match resp.json::<Value>().await {
                     Ok(job) => {
                         let job_id = job["id"].as_str().unwrap_or_default().to_string();
+                        let node_config = job["node_config"].clone();
                         println!("got job {}", job_id);
-                        let outcome = execute_job(&client, &cfg, &job["payload"]).await;
+                        let outcome = execute_job(&client, &cfg, &job["payload"], &node_config).await;
                         println!("job {} outcome: {:?}", job_id, outcome.is_ok());
                         report_result(&client, &cfg, &job_id, outcome).await;
                     }
