@@ -3,3 +3,4 @@ models/*.gguf
 *.log
 __pycache__/
 .venv/
+logs/

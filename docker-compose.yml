@@ -12,3 +12,18 @@ services:
     restart: unless-stopped
     cpus: "3.0"
     mem_limit: "4g"
+
+  hammer-api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    depends_on:
+      - llama-server
+    environment:
+      LLAMA_BASE_URL: http://llama-server:8080
+      HAMMER_PASSES: "5"
+    volumes:
+      - ./logs:/app/src/logs
+    ports:
+      - "8001:8000"
+    restart: unless-stopped

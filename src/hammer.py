@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass
+from typing import Callable
 
 from client import LlamaClient
 from sandbox import run_tests
@@ -25,11 +26,16 @@ def hammer_code(
     passes: int = 5,
     client: LlamaClient | None = None,
     verbose: bool = False,
+    on_pass: Callable[[dict], None] | None = None,
 ) -> CodeResult:
     """Generate code for `task`, verifying against `test_code` each pass.
 
     Stops as soon as the tests pass. If they never pass, returns the
     last attempt after `passes` rounds (CPU-budget ceiling).
+
+    `on_pass`, if given, is called after every pass with a record
+    (pass number, prompt messages, response, code, test output,
+    passed) so callers can persist iteration data for tuning.
     """
     client = client or LlamaClient()
     messages = [
@@ -41,6 +47,7 @@ def hammer_code(
 
     code = ""
     for i in range(1, passes + 1):
+        prompt = messages[-1]["content"]
         response = client.chat(messages)
         code = extract_code(response)
         messages.append({"role": "assistant", "content": response})
@@ -51,6 +58,18 @@ def hammer_code(
             print(f"--- pass {i} ---")
             print(code)
             print(f"[{'PASS' if result.passed else 'FAIL'}] {result.output.strip()}")
+
+        if on_pass:
+            on_pass(
+                {
+                    "pass": i,
+                    "prompt": prompt,
+                    "response": response,
+                    "code": code,
+                    "test_output": result.output,
+                    "passed": result.passed,
+                }
+            )
 
         if result.passed:
             return CodeResult(code=code, passed=True, passes_used=i)
