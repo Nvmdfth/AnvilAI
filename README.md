@@ -80,6 +80,15 @@ compile), the default model, and installs both `llama-server` and
 `hammer-api` as system-level `systemd` services under `/opt/anvilai`,
 running as `nobody` — survives reboot and logout.
 
+`LLAMA_THREADS`, `LLAMA_CTX_SIZE`, `LLAMA_PORT`, and `HAMMER_PORT` are
+overridable — pass them to `sudo` itself, not before the pipe (`sudo`
+drops the caller's environment unless a var is named on its own command
+line):
+
+```bash
+curl -sSL .../install.sh | sudo LLAMA_THREADS=8 LLAMA_CTX_SIZE=8192 bash
+```
+
 **No Docker - Windows (PowerShell, no admin required):**
 
 ```powershell
@@ -98,13 +107,17 @@ Points the engine above at the hub. Needs `HUB_URL` and `AGENT_TOKEN`
 **Linux:**
 
 ```bash
-cd omnimesh/client/agent
-sudo ./install.sh
+curl -sSL https://raw.githubusercontent.com/Nvmdfth/AnvilAI/main/omnimesh/client/agent/install.sh | sudo HUB_URL=http://<hub-host>:4000 AGENT_TOKEN=<matches the hub's> NODE_NAME=<name> bash
 ```
 
-Builds a release binary (needs a Rust toolchain — `rustup.rs`
-recommended) and installs it as a systemd service. Edit
-`/etc/omnimesh-agent.env` (`HUB_URL`, `AGENT_TOKEN`, `NODE_NAME`), then:
+Clones the repo and builds a release binary (needs a Rust toolchain —
+`rustup.rs` recommended), writes `/etc/omnimesh-agent.env` from the
+`HUB_URL`/`AGENT_TOKEN`/`NODE_NAME` passed above, and installs it as a
+systemd service. Leaving `AGENT_TOKEN` out writes a placeholder you'll
+need to fix before the service can register with the hub. Re-running
+the same command (e.g. with a new `AGENT_TOKEN`) updates the env file
+in place and restarts the service if it's already running; any var you
+leave out keeps whatever was written last time instead of resetting.
 
 ```bash
 sudo systemctl start omnimesh-agent
