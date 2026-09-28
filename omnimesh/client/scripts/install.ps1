@@ -9,6 +9,12 @@
 # needed, unlike a Windows service). Mirrors install.sh (Linux); see
 # that script for the systemd-based equivalent.
 $ErrorActionPreference = "Stop"
+# Invoke-WebRequest's default progress bar is notoriously CPU-heavy and
+# slow in Windows PowerShell 5.1 for large files - it can turn a 600MB
+# download that should take under a minute into one that spins a full
+# CPU core for 10+ minutes. This is the single biggest fix for install
+# speed here.
+$ProgressPreference = "SilentlyContinue"
 
 $InstallDir = "$env:LOCALAPPDATA\AnvilAI"
 $RepoUrl = "https://github.com/Nvmdfth/AnvilAI.git"
@@ -145,14 +151,32 @@ while (`$true) {
 }
 "@ | Set-Content -Encoding utf8 "$InstallDir\bin\start-hammer.ps1"
 
-Write-Host "--> Registering Scheduled Tasks (logon-triggered, no admin needed)..."
+Write-Host "--> Writing hidden-launch wrappers..."
+# -WindowStyle Hidden on powershell.exe is not reliably honored by
+# Task Scheduler - notably, when Windows Terminal is the default
+# terminal app (common on Win11), it opens a fully visible window
+# anyway, ignoring that flag entirely. WScript.Shell.Run's window-style
+# 0 bypasses PowerShell/Terminal's own window handling and is honored
+# unconditionally, so it's the only reliably-invisible option here.
 $PwshExe = (Get-Process -Id $PID).Path
 
+@"
+Set objShell = CreateObject("WScript.Shell")
+objShell.Run """$PwshExe"" -NoProfile -WindowStyle Hidden -File ""$InstallDir\bin\start-llama.ps1""", 0, False
+"@ | Set-Content -Encoding ascii "$InstallDir\bin\run-llama-hidden.vbs"
+
+@"
+Set objShell = CreateObject("WScript.Shell")
+objShell.Run """$PwshExe"" -NoProfile -WindowStyle Hidden -File ""$InstallDir\bin\start-hammer.ps1""", 0, False
+"@ | Set-Content -Encoding ascii "$InstallDir\bin\run-hammer-hidden.vbs"
+
+Write-Host "--> Registering Scheduled Tasks (logon-triggered, no admin needed)..."
+
 schtasks /Create /F /SC ONLOGON /RL LIMITED /TN "AnvilAI-Llama" `
-    /TR "`"$PwshExe`" -NoProfile -WindowStyle Hidden -File `"$InstallDir\bin\start-llama.ps1`"" | Out-Null
+    /TR "wscript.exe //B `"$InstallDir\bin\run-llama-hidden.vbs`"" | Out-Null
 
 schtasks /Create /F /SC ONLOGON /RL LIMITED /TN "AnvilAI-Hammer" `
-    /TR "`"$PwshExe`" -NoProfile -WindowStyle Hidden -File `"$InstallDir\bin\start-hammer.ps1`"" | Out-Null
+    /TR "wscript.exe //B `"$InstallDir\bin\run-hammer-hidden.vbs`"" | Out-Null
 
 Write-Host "--> Starting services now (Scheduled Tasks only fire on next logon otherwise)..."
 schtasks /Run /TN "AnvilAI-Llama" | Out-Null
