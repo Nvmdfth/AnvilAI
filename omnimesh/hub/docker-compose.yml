@@ -1,0 +1,16 @@
+services:
+  omnimesh-db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: omnimesh
+      POSTGRES_PASSWORD: omnimesh
+      POSTGRES_DB: omnimesh
+    ports:
+      - "5432:5432"
+    volumes:
+      - omnimesh-db-data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    restart: unless-stopped
+
+volumes:
+  omnimesh-db-data:

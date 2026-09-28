@@ -4,3 +4,6 @@ models/*.gguf
 __pycache__/
 .venv/
 logs/
+node_modules/
+omnimesh/hub/dist/
+target/
