@@ -15,7 +15,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /src/build/bin/llama-server /usr/local/bin/llama-server
+COPY --from=build /src/build/bin/ /usr/local/lib/llama.cpp/
+RUN ln -s /usr/local/lib/llama.cpp/llama-server /usr/local/bin/llama-server \
+    && echo /usr/local/lib/llama.cpp > /etc/ld.so.conf.d/llama.conf \
+    && ldconfig
 
 WORKDIR /models
 EXPOSE 8080
