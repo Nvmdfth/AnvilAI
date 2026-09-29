@@ -299,6 +299,39 @@ app.post("/v1/chat/completions", requireAuth, async (req, res) => {
   res.end();
 });
 
+// Nodes only refresh last_seen_at on /heartbeat and /poll, and the agent
+// doesn't poll while a job is running (main.rs's loop blocks on
+// execute_job for up to CHAT_JOB_TIMEOUT_MS) - so a node with a job
+// actively assigned to it goes quiet on purpose, not because it died.
+// DEGRADED excludes those; DEAD does not, since a job stuck that long
+// past its own timeout means the node is gone either way.
+const NODE_DEGRADED_AFTER_MS = Number(process.env.NODE_DEGRADED_AFTER_MS ?? 60_000);
+const NODE_DEAD_AFTER_MS = Number(process.env.NODE_DEAD_AFTER_MS ?? 900_000);
+const HEALTH_CHECK_INTERVAL_MS = Number(process.env.HEALTH_CHECK_INTERVAL_MS ?? 30_000);
+
+async function sweepStaleNodes() {
+  const degraded = await db.query(
+    `UPDATE nodes n SET status = 'degraded'
+     WHERE n.status NOT IN ('degraded', 'dead')
+       AND now() - n.last_seen_at > ($1 || ' milliseconds')::interval
+       AND NOT EXISTS (
+         SELECT 1 FROM jobs j WHERE j.assigned_node_id = n.id AND j.status = 'assigned'
+       )
+     RETURNING *`,
+    [NODE_DEGRADED_AFTER_MS]
+  );
+  const dead = await db.query(
+    `UPDATE nodes SET status = 'dead'
+     WHERE status <> 'dead' AND now() - last_seen_at > ($1 || ' milliseconds')::interval
+     RETURNING *`,
+    [NODE_DEAD_AFTER_MS]
+  );
+  for (const node of [...degraded.rows, ...dead.rows]) broadcast("node", node);
+}
+setInterval(() => {
+  sweepStaleNodes().catch((err) => console.error("health sweep failed:", err));
+}, HEALTH_CHECK_INTERVAL_MS);
+
 const port = Number(process.env.PORT ?? 4000);
 const httpServer = createServer(app);
 attachWebSocket(httpServer);
